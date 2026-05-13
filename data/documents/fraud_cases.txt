@@ -1,0 +1,94 @@
+BANKING FRAUD CASE REPORT
+Classification: INTERNAL USE ONLY
+Period: January – February 2024
+Prepared by: Risk & Compliance Team
+
+═══════════════════════════════════════════════════════════════
+CASE FC-2024-001 | HIGH PRIORITY
+Date: 2024-01-19
+Customer: C005 | Region: North
+Product: Credit Card
+Transaction Amount: $12,000.75
+Type: Debit
+
+Summary:
+Customer C005 initiated an unusually large credit card debit transaction
+of $12,000.75 — approximately 4.2× their 90-day average transaction value.
+The transaction originated from an unrecognised IP address in a foreign
+country while the customer's physical card was reported in use domestically
+at the same timestamp. Suspected card-not-present fraud.
+
+Actions Taken:
+  • Card blocked within 2 hours of detection by automated monitoring system.
+  • Customer notified via SMS and email.
+  • Chargeback process initiated with the merchant.
+  • Case forwarded to Financial Crimes Unit for further investigation.
+  • Provisional credit of $12,000.75 applied to customer account pending review.
+
+Status: UNDER INVESTIGATION
+
+═══════════════════════════════════════════════════════════════
+CASE FC-2024-002 | MEDIUM PRIORITY
+Date: 2024-01-22
+Customer: C008 | Region: West
+Product: Credit Card
+Transaction Amount: $4,500.25
+Type: Debit
+
+Summary:
+Three successive debit transactions of similar amounts ($4,500.25, $4,490.00,
+$4,510.75) were attempted within a 6-minute window on 2024-01-22, triggering
+the velocity-check rule in the fraud detection engine.
+Pattern is consistent with card testing — fraudsters make multiple similar
+amounts to verify card validity before a larger purchase.
+
+Actions Taken:
+  • Velocity rule triggered automatic transaction hold after second attempt.
+  • Two of three transactions declined; first transaction approved before rule fired.
+  • Customer contacted for verification — confirmed card lost two days prior.
+  • Replacement card issued; dispute process initiated for the approved transaction.
+
+Status: RESOLVED — REFUND ISSUED
+
+═══════════════════════════════════════════════════════════════
+CASE FC-2024-003 | CRITICAL
+Date: 2024-02-02
+Customer: C018 | Region: South
+Product: Credit Card
+Transaction Amount: $15,600.00
+Type: Debit
+
+Summary:
+Customer C018 contacted the bank on 2024-02-02 to dispute a $15,600.00
+debit transaction. Customer states no knowledge of this transaction.
+Internal investigation revealed the customer's online banking credentials
+were compromised via a phishing email sent 72 hours prior to the transaction.
+The funds were transferred to a mule account before the fraud was identified.
+
+Actions Taken:
+  • Online banking access suspended immediately upon fraud report.
+  • Credential reset enforced; multi-factor authentication enabled.
+  • Law enforcement notified per regulatory obligation (AML reporting threshold exceeded).
+  • Mule account flagged with correspondent bank; fund recovery attempt in progress.
+  • Customer compensated in full per the bank's fraud liability policy.
+
+Status: LAW ENFORCEMENT REFERRAL — FUND RECOVERY PENDING
+
+═══════════════════════════════════════════════════════════════
+FRAUD TRENDS SUMMARY — Q1 2024
+Total Cases Reported:     3
+Total Value at Risk:  $32,101.00
+Cases Resolved:           1 (33%)
+Cases Under Investigation: 2 (67%)
+
+Top Fraud Vectors:
+  1. Card-Not-Present (CNP) attacks         — 2 cases
+  2. Phishing / Credential Compromise       — 1 case
+
+High-Risk Products:  Credit Card (100% of cases this period)
+High-Risk Regions:   North, West, South
+
+Recommendations:
+  • Accelerate rollout of real-time ML scoring for transactions >$3,000.
+  • Implement mandatory MFA for all online banking sessions by Q2 2024.
+  • Increase customer education on phishing awareness.

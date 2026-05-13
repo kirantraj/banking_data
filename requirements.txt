@@ -1,0 +1,15 @@
+# MCP Protocol  (requires Python >= 3.10)
+mcp>=1.0.0
+
+# Vertex AI / Gemini
+google-cloud-aiplatform>=1.60.0
+vertexai>=1.60.0
+
+# BigQuery
+google-cloud-bigquery>=3.20.0
+
+# Environment config
+python-dotenv>=1.0.0
+
+# Optional: better JSON parsing
+ujson>=5.9.0

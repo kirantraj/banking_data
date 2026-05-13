@@ -1,0 +1,48 @@
+{
+  "table": "sales_data",
+  "full_name": "{project_id}.banking_demo.sales_data",
+  "description": "Core transaction ledger for the banking demo dataset",
+  "columns": [
+    {
+      "name": "date",
+      "type": "DATE",
+      "description": "Calendar date of the transaction",
+      "example": "2024-01-15"
+    },
+    {
+      "name": "product",
+      "type": "STRING",
+      "description": "Banking product associated with the transaction",
+      "values": ["Savings Account", "Credit Card", "Home Loan", "Personal Loan"]
+    },
+    {
+      "name": "revenue",
+      "type": "FLOAT64",
+      "description": "Transaction amount in US dollars",
+      "range": "3100.00 – 110000.00"
+    },
+    {
+      "name": "customer_id",
+      "type": "STRING",
+      "description": "Unique customer identifier",
+      "format": "C### (e.g. C001, C020)"
+    },
+    {
+      "name": "region",
+      "type": "STRING",
+      "description": "Geographic region of the customer or branch",
+      "values": ["North", "South", "East", "West"]
+    },
+    {
+      "name": "transaction_type",
+      "type": "STRING",
+      "description": "Direction of the transaction",
+      "values": ["credit", "debit"]
+    }
+  ],
+  "row_count": 20,
+  "date_range": {
+    "min": "2024-01-15",
+    "max": "2024-02-04"
+  }
+}
