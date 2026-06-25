@@ -1,370 +1,338 @@
-# Banking Data Copilot
+# 🏦 Banking Data Copilot
 
-A multi-agent AI system that lets non-technical users query BigQuery in plain English. Built with Python, MCP (Model Context Protocol), Vertex AI Gemini, and BigQuery.
+> A production-grade multi-agent AI system that lets business users query complex banking datasets using plain English — no SQL required.
 
-The agents handle natural-language understanding, SQL generation, validation, and explanation. The MCP layer handles the actual execution against BigQuery and local documents. Reasoning and execution stay strictly separated, which is what makes the system safe to point at real data.
-
----
-
-## Why this project
-
-I built this to learn how production-pattern agentic systems are actually structured, coming from a data engineering background. Specifically:
-
-* How to separate LLM reasoning from deterministic tool execution
-* How MCP fits between agents and tools as a clean protocol boundary
-* How to apply defense-in-depth safety around LLM-generated SQL
-* How to design narrow, single-responsibility agents instead of one giant prompt
-
-The codebase reflects those goals. It is intentionally simple enough to read end-to-end in 30 minutes, while still showing the patterns I would carry into a real production system.
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
+[![Vertex AI](https://img.shields.io/badge/Google-Vertex%20AI-4285F4.svg)](https://cloud.google.com/vertex-ai)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-green.svg)](https://modelcontextprotocol.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## Architecture
+## 📌 Overview
+
+The Banking Data Copilot bridges the gap between business users and financial data. Instead of writing SQL or waiting for a data team, users simply ask questions in plain English:
+
+> *"Which customers had more than 5 transactions over $10,000 in the last 90 days?"*
+
+The system handles the rest — decomposing the question, generating and validating SQL, executing it safely, and returning a human-readable explanation.
+
+Built as a capstone project for the [5-Day AI Agents Intensive Vibe Coding Course with Google](https://www.kaggle.com/competitions/5-day-ai-agents-intensive-vibecoding-course-with-google) on Kaggle.
+
+---
+
+## 🏗️ Architecture
+
+The system is composed of four specialized agents connected through an MCP (Model Context Protocol) server:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Query (NL)                          │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    AGENT LAYER  (Vertex AI Gemini)              │
-│                                                                 │
-│   Planner  →  SQL Generator  →  SQL Validator (LLM)             │
-│      │              │                  │                        │
-│      └──────────────┴──────────────────┘                        │
-│                                                                 │
-│                       Explainer  ◄── results                    │
-└─────────────────────┬───────────────────────────────────────────┘
-                      │  list_tools() / call_tool()
-                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                MCP CLIENT  (BankingMCPClient)                   │
-│       Async context manager that spawns the server subprocess   │
-└─────────────────────┬───────────────────────────────────────────┘
-                      │  stdio (JSON-RPC 2.0)
-                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  MCP SERVER  (separate process)                 │
-│                                                                 │
-│   ┌─────────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│   │  query_bigquery │  │  validate_sql  │  │search_documents│  │
-│   │  SELECT only    │  │  safety rules  │  │ keyword search │  │
-│   │  LIMIT enforced │  │  + table allow │  │ over .txt      │  │
-│   └────────┬────────┘  └────────────────┘  └────────────────┘  │
-└────────────┼────────────────────────────────────────────────────┘
-             │
-             ▼
-    ┌────────────────┐      ┌──────────────────────────────┐
-    │   BigQuery     │      │  data/documents/*.txt        │
-    │  banking_demo  │      │  (fraud_cases.txt,           │
-    │  .sales_data   │      │   compliance_report.txt)     │
-    └────────────────┘      └──────────────────────────────┘
+User Natural Language Question
+        │
+        ▼
+┌─────────────────┐
+│  Planner Agent  │  ← Decomposes the question into a structured query plan
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  SQL Generator  │  ← Translates plan to SQL using schema context
+│  Agent          │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Validator      │  ← Reviews SQL for correctness and safety
+│  Agent          │
+└────────┬────────┘
+         │
+         ▼
+┌──────────────────────────────┐
+│         MCP Server           │
+│  • execute_query(sql)        │
+│  • get_schema()              │
+│  • validate_sql(sql)         │
+└────────┬─────────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Explainer      │  ← Translates results into business narrative
+│  Agent          │
+└────────┬────────┘
+         │
+         ▼
+  Human-Readable Answer
 ```
 
-### Key design principles
+### Agent Responsibilities
 
-| Principle              | Implementation                                                              |
-| ---------------------- | --------------------------------------------------------------------------- |
-| Reasoning vs execution | Agents call Gemini. MCP tools run I/O. Never mixed.                         |
-| Defense in depth       | LLM validator (semantic) plus deterministic `validate_sql` tool (safety)    |
-| Cost control           | Mandatory dry-run, `maximum_bytes_billed` cap, and auto-injected `LIMIT`    |
-| Local testability      | `USE_MOCK_DATA=true` runs the full pipeline without GCP credentials         |
-| Auditability           | Every agent and tool call is logged with inputs and truncated outputs       |
+| Agent | Role |
+|---|---|
+| **Planner** | Decomposes natural language into a structured query plan (JSON output) |
+| **SQL Generator** | Converts the plan into syntactically correct SQL using live schema context |
+| **Validator** | Checks SQL for safety (blocks DROP/DELETE/UPDATE) and schema alignment |
+| **Explainer** | Returns results as a plain-English business narrative with domain context |
+
+### MCP Server Tools
+
+| Tool | Description |
+|---|---|
+| `execute_query(sql)` | Runs validated SQL against the banking dataset |
+| `get_schema()` | Returns live database schema to ground the SQL Generator |
+| `validate_sql(sql)` | Rule-based safety check before execution |
 
 ---
 
-## Quick start (no GCP required)
+## 🔒 Security Design
 
-The fastest way to see the system in action. Mock mode runs the full pipeline end-to-end with no Gemini calls and no BigQuery setup.
+Security is a first-class concern throughout the system:
+
+- **No direct database access** — all data operations go through the MCP server's tool interface
+- **Read-only enforcement** — the Validator agent and `validate_sql` tool block all destructive SQL (DROP, DELETE, UPDATE, INSERT)
+- **Credential safety** — all API keys and credentials managed via environment variables, never hardcoded
+- **`.env` excluded** — credentials are never committed to version control (see `.gitignore`)
+- **Application Default Credentials (ADC)** — used for Google Cloud authentication, following GCP security best practices
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|---|---|
+| LLM / Agent backbone | Google Vertex AI (Gemini) |
+| Agent protocol | Model Context Protocol (MCP) |
+| MCP server | FastAPI (Python) |
+| Orchestration | Python |
+| Database | SQLite (local) / BigQuery (cloud) |
+| Deployment target | Google Cloud Run |
+
+---
+
+## 📋 Prerequisites
+
+- Python 3.10+
+- Google Cloud account with Vertex AI API enabled
+- Gemini API access (via Vertex AI or AI Studio)
+- `gcloud` CLI installed and authenticated
+
+---
+
+## ⚙️ Setup & Installation
+
+### 1. Clone the repository
 
 ```bash
-# 1. Clone and enter the project
 git clone https://github.com/kirantraj/banking_data.git
 cd banking_data
+```
 
-# 2. Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+### 2. Create and activate a virtual environment
 
-# 3. Install dependencies
+```bash
+python -m venv venv
+source venv/bin/activate        # Mac/Linux
+# venv\Scripts\activate         # Windows
+```
+
+### 3. Install dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# 4. Copy the example config (mock mode is on by default)
+### 4. Configure environment variables
+
+```bash
 cp .env.example .env
+```
 
-# 5. Run a demo query
-python main.py "Top 5 customers by revenue"
+Edit `.env` and fill in your credentials:
 
-# Or run several pre-built demo queries
-python main.py --demo
+```env
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+GOOGLE_CLOUD_REGION=us-central1
+VERTEX_AI_MODEL=gemini-1.5-pro
+DATABASE_PATH=data/banking.db
+MCP_SERVER_PORT=8000
+```
 
-# Or open an interactive session
+> ⚠️ **Never commit your `.env` file.** It is excluded via `.gitignore`.
+
+### 5. Authenticate with Google Cloud
+
+```bash
+gcloud auth application-default login
+```
+
+### 6. Start the MCP server
+
+```bash
+python mcp_server.py
+```
+
+The server will start on `http://localhost:8000`. You should see:
+
+```
+MCP Server running on port 8000
+Tools registered: execute_query, get_schema, validate_sql
+```
+
+### 7. Run the agent
+
+```bash
 python main.py
 ```
 
-In mock mode you will see the full agent pipeline run, with stubbed Gemini responses and a fake BigQuery dataset. This is enough to understand the flow without spending a dollar.
-
 ---
 
-## GCP and Vertex AI setup
+## 💬 Example Interaction
 
-When you are ready to run against real Gemini and real BigQuery:
+**User input:**
+```
+Which customers had more than 5 transactions over $10,000 in the last 90 days?
+```
 
-```bash
-# 1. Update .env
-GCP_PROJECT_ID=your-project-id
-USE_MOCK_DATA=false
+**Planner Agent:**
+```json
+{
+  "intent": "aggregate_filter",
+  "table": "transactions",
+  "filters": ["amount > 10000", "transaction_date >= DATE('now', '-90 days')"],
+  "group_by": "customer_id",
+  "having": "COUNT(*) > 5",
+  "output": ["customer_id", "transaction_count"]
+}
+```
 
-# 2. Authenticate locally
-gcloud auth application-default login
+**SQL Generator:**
+```sql
+SELECT customer_id, COUNT(*) as txn_count
+FROM transactions
+WHERE amount > 10000
+  AND transaction_date >= DATE('now', '-90 days')
+GROUP BY customer_id
+HAVING COUNT(*) > 5
+ORDER BY txn_count DESC;
+```
 
-# 3. Enable required APIs
-gcloud services enable bigquery.googleapis.com aiplatform.googleapis.com
+**Validator:**
+```
+✅ No destructive operations detected.
+✅ Schema fields verified: transactions.customer_id, transactions.amount, transactions.transaction_date
+✅ Approved for execution.
+```
 
-# 4. Create the demo BigQuery dataset and table
-python setup_bigquery.py
-
-# 5. Run with real data
-python main.py --demo
+**Explainer Agent:**
+```
+3 customers exceeded the high-value transaction threshold in the last 90 days.
+Customer C-4471 had the highest activity with 12 transactions averaging $47,300 each.
+This pattern may warrant closer review from a compliance or fraud detection standpoint.
 ```
 
 ---
 
-## Project structure
+## 📁 Project Structure
 
 ```
 banking_data/
-├── main.py                        # Entry point: interactive, demo, or single query
-├── setup_bigquery.py              # One-time BQ dataset and table creation
+│
+├── main.py                  # Entry point — orchestrates the agent pipeline
+├── mcp_server.py            # FastAPI MCP server exposing data tools
 ├── requirements.txt
-├── .env.example
+├── .env.example             # Template for environment variables
+├── .gitignore               # Excludes .env and credentials
 │
-├── config/
-│   └── settings.py                # All configuration via env vars
+├── agents/
+│   ├── planner.py           # Planner Agent — decomposes user questions
+│   ├── sql_generator.py     # SQL Generator Agent — produces SQL queries
+│   ├── validator.py         # Validator Agent — safety and schema checks
+│   └── explainer.py         # Explainer Agent — human-readable results
 │
-├── agents/                        # LLM reasoning layer (Vertex AI Gemini)
-│   ├── base.py                    # BaseAgent with generate() and mock fallback
-│   ├── planner.py                 # Routes queries to sql, docs, or both
-│   ├── sql_generator.py           # Natural language to BigQuery SQL
-│   ├── sql_validator.py           # LLM semantic review of generated SQL
-│   └── explainer.py               # Results to business English
+├── tools/
+│   ├── execute_query.py     # MCP tool: runs SQL against database
+│   ├── get_schema.py        # MCP tool: returns database schema
+│   └── validate_sql.py      # MCP tool: rule-based SQL safety check
 │
-├── mcp_server/                    # MCP server subprocess (execution only)
-│   ├── server.py                  # list_tools and call_tool dispatcher
-│   └── tools/
-│       ├── bigquery_tool.py       # query_bigquery: dry-run, cost cap, execute
-│       ├── validate_sql.py        # validate_sql: sqlparse + regex safety
-│       └── search_docs.py         # search_documents: keyword scoring
+├── data/
+│   └── banking.db           # SQLite banking dataset (synthetic)
 │
-├── mcp_client/
-│   └── client.py                  # BankingMCPClient: async context manager
-│
-├── orchestrator/
-│   └── copilot.py                 # BankingCopilot.answer(): the full pipeline
-│
-├── utils/
-│   ├── logger.py                  # Structured console logging
-│   └── cache.py                   # In-memory TTL cache (MD5-keyed)
-│
-└── data/
-    ├── documents/                 # Source files for document search
-    │   ├── fraud_cases.txt
-    │   └── compliance_report.txt
-    └── schema/
-        └── sales_data.json        # Schema reference for documentation
+└── docs/
+    └── architecture.png     # Architecture diagram
 ```
 
 ---
 
-## Agent pipeline, step by step
+## 🚀 Deployment (Google Cloud Run)
 
-The exact sequence the system runs when you ask a question.
+The MCP server is containerized for deployment on Cloud Run:
 
-### Example: "Top 10 customers by transaction amount last month"
+```bash
+# Build container
+docker build -t banking-data-copilot .
 
-```
-Step 1. User query arrives at the orchestrator.
+# Push to Artifact Registry
+docker tag banking-data-copilot gcr.io/YOUR_PROJECT/banking-data-copilot
+docker push gcr.io/YOUR_PROJECT/banking-data-copilot
 
-Step 2. PlannerAgent  [Gemini call #1]
-        Decides the route: "sql_query"
-        Reasoning: "User asks for ranked data from the database"
-
-Step 3. SQLGeneratorAgent  [Gemini call #2]
-        Generates the SQL using the schema in its prompt:
-
-        SELECT customer_id,
-               SUM(revenue) AS total_revenue,
-               COUNT(*)     AS tx_count
-        FROM `project.banking_demo.sales_data`
-        WHERE DATE_TRUNC(date, MONTH) =
-              DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH), MONTH)
-        GROUP BY customer_id
-        ORDER BY total_revenue DESC
-        LIMIT 10
-
-Step 4. SQLValidatorAgent  [Gemini call #3]
-        Semantic review: does this SQL actually answer the question?
-        Result: approved
-
-Step 5. MCP: validate_sql  [tool call #1]
-        Deterministic safety check (sqlparse + regex):
-        - Must start with SELECT
-        - No DROP, DELETE, UPDATE, TRUNCATE, etc.
-        - Table must be in the allowlist
-        - LIMIT auto-injected if missing
-        Result: valid
-
-Step 6. MCP: query_bigquery  [tool call #2]
-        - Re-validates the SQL inside the tool
-        - Runs a dry-run to estimate bytes scanned
-        - Refuses anything over the cost cap
-        - Executes with maximum_bytes_billed set
-        Result: 10 rows returned
-
-Step 7. ExplainerAgent  [Gemini call #4]
-        Receives the rows and produces a plain-English summary.
-        The prompt forbids inventing figures not present in the data.
-
-Step 8. Final response is cached and returned to the user.
+# Deploy to Cloud Run
+gcloud run deploy banking-data-copilot \
+  --image gcr.io/YOUR_PROJECT/banking-data-copilot \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated
 ```
 
-Total: 4 Gemini calls, 2 MCP tool calls, typically 5 to 8 seconds end to end.
+---
+
+## 🧠 Key Design Decisions
+
+**Why four agents instead of one?**
+A single LLM prompt could attempt all steps but fails in predictable ways — hallucinated SQL, no validation, no recovery. Separating into specialized agents lets each one fail gracefully and allows the pipeline to catch errors at each stage.
+
+**Why MCP for the tool layer?**
+MCP creates a clean, enforced boundary between agent reasoning and data execution. Agents cannot access the database directly — they must use the tools exposed by the MCP server. This makes the system auditable and safe by design.
+
+**Why inject schema on every call?**
+Early testing showed the SQL Generator frequently produced wrong field names without live schema context. Calling `get_schema()` on every request grounds the agent in the actual database structure and eliminates this class of errors.
 
 ---
 
-## Sample output
+## 📚 Course Concepts Applied
 
-```
-================================================================
-  QUERY    : Show me the top 10 customers by total transaction amount
-  PIPELINE : sql_query  |  ROWS: 10  |  TIME: 3.42s
-================================================================
+This project applies the following concepts from the 5-Day AI Agents Intensive:
 
-SUMMARY
-Customer C020 leads all clients with $110,000 in transactions, driven
-by a single Home Loan disbursement. Home Loan customers dominate the
-top revenue tier, with C012 at $95,000 and C007 at $78,000 rounding
-out the top three.
-
-TOP RESULTS
-| Customer | Product   | Revenue   | Region |
-|----------|-----------|-----------|--------|
-| C020     | Home Loan | $110,000  | West   |
-| C012     | Home Loan | $95,000   | West   |
-| C007     | Home Loan | $78,000   | East   |
-| C016     | Home Loan | $67,500   | West   |
-| C003     | Home Loan | $52,000   | East   |
-
-SQL EXECUTED
-SELECT customer_id, SUM(revenue) AS total_revenue ... LIMIT 10
-================================================================
-```
-
-The Explainer agent is intentionally constrained to summarize what the data shows. It does not produce business recommendations or projections, because hallucinated advice in a banking context is a real risk. If you want recommendations, that belongs in a separate agent with explicit guardrails.
+| Concept | Where |
+|---|---|
+| Multi-agent system | `agents/` — four specialized agents with clear boundaries |
+| MCP Server | `mcp_server.py` + `tools/` |
+| Security features | Validator agent, `validate_sql` tool, ADC authentication |
+| Deployability | Cloud Run deployment via Docker |
+| Agent skills | Explainer agent (domain-aware financial narrative generation) |
 
 ---
 
-## Safety model
+## 🗺️ Roadmap
 
-LLMs can be jailbroken, hallucinate, or change behavior between model versions. So the system never relies on the LLM to decide whether a query is safe to run. It relies on deterministic code.
-
-There are four independent layers between a user question and BigQuery:
-
-1. **Prompt-level constraints** in the SQL generator. The model is told it can only produce SELECT statements and must include LIMIT. This is the first filter, not the last.
-2. **LLM semantic review** by the validator agent. Catches questions where the SQL is syntactically correct but does not actually match user intent. (Example: user asks for top customers, SQL groups by product.)
-3. **Deterministic safety check** in the `validate_sql` MCP tool. Uses `sqlparse` plus regex. Rejects forbidden keywords, multi-statement queries, and non-allowlisted tables. Injects LIMIT if missing. This layer cannot be reasoned with, which is the point.
-4. **BigQuery `maximum_bytes_billed`** cap. The last line of defense. Even if everything above failed, BigQuery itself refuses to bill more than the configured ceiling.
-
-If layer 3 is removed, the system is not safe regardless of how good the LLM validator is. Anything that can be reasoned with cannot be a security boundary.
+- [ ] Streamlit / Gradio front-end for interactive web UI
+- [ ] Multi-table JOIN support for complex analytical queries
+- [ ] Conversation memory for follow-up question context
+- [ ] Live Cloud Run deployment with public demo endpoint
+- [ ] BigQuery backend for production-scale datasets
 
 ---
 
-## Why MCP?
+## 👤 Author
 
-MCP is an open protocol that defines how an AI system talks to tools. It is what cleanly separates the "thinking" layer from the "doing" layer in this project.
-
-Concretely, MCP gives me:
-
-* **Transport independence**. The MCP server runs as a local subprocess today over stdio. It could move to a remote HTTP/SSE service tomorrow without any agent-side code changes.
-* **Runtime tool discovery**. Agents call `list_tools()` to find what is available. New tools appear automatically.
-* **Process isolation**. The MCP server is its own OS process. If a tool crashes, the agents keep running.
-* **Reusability**. The same MCP server could be plugged into a different MCP-aware client (Claude, another Gemini app, anything) without changes.
-
-For a three-tool demo this is overkill. For a real system with dozens of tools across multiple teams, this is the difference between a clean protocol boundary and an integration nightmare.
+**Kiran Thyagaraj**  
+Senior Data Engineer | AI/ML Practitioner  
+[GitHub](https://github.com/kirantraj) · [LinkedIn](https://linkedin.com/in/kiran-thyagaraj)
 
 ---
 
-## Limitations and what I would improve
+## 📄 License
 
-This is a portfolio project, not a production system. A few things I know are limitations:
-
-* **Impossible questions are handled poorly.** If the user asks about a column that does not exist (e.g., `customer_name` when the schema has none), the SQL generator will hallucinate, the validators will not catch it, BigQuery will return a column-not-found error, and the retry loop will burn Gemini calls without making progress. A better design would have the planner detect impossible questions upfront.
-* **The keyword document search is primitive.** It is fine for a demo but would not scale past a few dozen documents. In production this would be a vector store (Vertex AI Matching Engine or pgvector) with embeddings.
-* **The cache is in-memory.** Process-local, lost on restart, no multi-user awareness. Production would use Redis.
-* **No row-level access control.** All queries run as the same service account. A real banking system would scope BigQuery permissions per user role.
-* **No evaluation harness.** I tested manually with a small set of queries. A production version would have a regression suite of NL-to-SQL pairs with automated accuracy scoring.
-* **Streaming is not supported.** Long-running queries block the caller. Should be moved to `asyncio.Queue` or server-sent events.
-
-I deliberately left these out to keep the codebase short and readable. They are real and I know where they would go.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## Extending the system
-
-### Add a new MCP tool
-
-```python
-# mcp_server/tools/my_tool.py
-def my_tool(param: str) -> dict:
-    return {"result": "..."}
-
-# Then register it in mcp_server/server.py inside list_tools()
-# and the call_tool() dispatcher.
-```
-
-The agents will discover it automatically via `list_tools()`. No changes needed in the agent layer.
-
-### Add a new agent
-
-```python
-# agents/my_agent.py
-from agents.base import BaseAgent
-
-class MyAgent(BaseAgent):
-    def __init__(self):
-        super().__init__("my_agent")
-
-    def run(self, user_input: str) -> dict:
-        return self.generate(self._build_prompt(user_input))
-
-    def _build_prompt(self, user_input: str) -> str:
-        return f"... {user_input} ... respond with JSON: {{}}"
-
-    def _mock_response(self, prompt: str) -> dict:
-        return {"result": "mock"}
-```
-
-Then wire it into `orchestrator/copilot.py` at the point in the pipeline where it should run.
-
-### Add voice input
-
-Replace `input("You: ")` in `main.py` with any speech-to-text library (Google Cloud Speech-to-Text, Whisper). The rest of the pipeline is unchanged because the input contract is just a string.
-
----
-
-## Dependencies
-
-| Package                   | Purpose                                    |
-| ------------------------- | ------------------------------------------ |
-| `mcp>=1.0.0`              | Model Context Protocol client and server   |
-| `google-cloud-aiplatform` | Vertex AI SDK (Gemini)                     |
-| `google-cloud-bigquery`   | BigQuery client                            |
-| `python-dotenv`           | `.env` file loading                        |
-| `sqlparse`                | SQL parsing for the validator tool         |
-
----
-
-## Feedback welcome
-
-If you build something similar, or if you spot something I got wrong, open an issue or reach out. Both are useful.
+*Built with Google Vertex AI, Gemini, Model Context Protocol (MCP), Python, and FastAPI.*  
+*Submitted as a capstone project for the Kaggle 5-Day AI Agents Intensive Vibe Coding Course with Google.*
